@@ -235,6 +235,9 @@ public:
 
   // Support for short branches
   bool may_be_short_branch() const { return (flags() & Flag_may_be_short_branch) != 0; }
+  // Support for compressed branches
+  bool may_be_compressed_branch() const { return (flags() & Flag_may_be_compressed_branch) != 0; }
+  void mark_may_be_compressed_branch()  { add_flag(Flag_may_be_compressed_branch);  }
 
   // Avoid back to back some instructions on some CPUs.
   enum AvoidBackToBackFlag { AVOID_NONE = 0,
@@ -290,7 +293,7 @@ public:
   // Size of instruction in bytes
   virtual uint  size(PhaseRegAlloc *ra_) const;
   // Helper function that computes size by emitting code
-  virtual uint  emit_size(PhaseRegAlloc *ra_) const;
+  virtual uint  emit_size(PhaseRegAlloc *ra_, int branch_offset) const;
 
   // Return the alignment required (in units of relocInfo::addr_unit())
   // for this instruction (must be a power of 2)
@@ -679,7 +682,13 @@ public:
 // Abstract machine branch Node
 class MachBranchNode : public MachIdealNode {
 public:
-  MachBranchNode() : MachIdealNode() {
+  // Compress branch
+  enum CompressBranchMode {
+      NON_COMPRESS,
+      TRY_COMPRESS,
+      FORCE_COMPRESS,
+  };
+  MachBranchNode() : MachIdealNode(), _compress_mode(NON_COMPRESS) {
     init_class_id(Class_MachBranch);
   }
   virtual void label_set(Label* label, uint block_num) = 0;
@@ -687,8 +696,16 @@ public:
 
   // Support for short branches
   virtual MachNode *short_branch_version() { return NULL; }
+  // Actual size of branch instruction with given offset, in compress branch, instruction size can be changed
+  // with offset
+  uint  actual_branch_size(PhaseRegAlloc *ra_, int branch_offset) const;
 
   virtual bool pinned() const { return true; };
+
+  CompressBranchMode compress_mode() const { return _compress_mode; }
+  void set_compress_mode(CompressBranchMode _v) {_compress_mode = _v;}
+private:
+  CompressBranchMode _compress_mode;
 };
 
 //------------------------------MachNullChkNode--------------------------------
@@ -788,6 +805,9 @@ public:
   MachGotoNode() : MachBranchNode() {
     init_class_id(Class_MachGoto);
   }
+#ifndef PRODUCT
+  virtual void dump_spec(outputStream *st) const;
+#endif
 };
 
 //------------------------------MachFastLockNode-------------------------------------

@@ -705,7 +705,7 @@ public:
   void NAME(Register Rs1, Register Rs2, const address dest) {                                            \
     assert_cond(dest != NULL);                                                                           \
     int64_t offset = (dest - pc());                                                                      \
-    guarantee(is_imm_in_range(offset, 12, 1), "offset is invalid.");                                     \
+    guarantee(is_imm_in_range(offset, 12, 1), "offset %ld is invalid.", offset);                                     \
     NAME(Rs1, Rs2, offset);                                                                              \
   }                                                                                                      \
   INSN_ENTRY_RELOC(void, NAME(Register Rs1, Register Rs2, address dest, relocInfo::relocType rtype))     \

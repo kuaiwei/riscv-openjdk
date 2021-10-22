@@ -30,6 +30,7 @@
 #include "asm/assembler.hpp"
 #include "oops/compressedOops.hpp"
 #include "utilities/powerOfTwo.hpp"
+#include "nativeInst_riscv64.hpp"
 
 // MacroAssembler extends Assembler by frequently used macros.
 //
@@ -523,6 +524,19 @@ class MacroAssembler: public Assembler {
 
   void bind(Label& L) {
     Assembler::bind(L);
+    // fences across basic blocks should not be merged
+    code()->clear_last_insn();
+  }
+
+  void bind_with_offset(Label& L, int offset) {
+    Assembler::bind(L);
+    // extend offset to align with compressed instruction size
+    if (offset < 0) {
+        offset = align_down(offset, NativeInstruction::compressed_instruction_size);
+    } else {
+        offset = align_up(offset, NativeInstruction::compressed_instruction_size);
+    }
+    L.set_given_offset(offset);
     // fences across basic blocks should not be merged
     code()->clear_last_insn();
   }

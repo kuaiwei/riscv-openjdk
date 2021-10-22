@@ -2755,6 +2755,10 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
     return JNI_EINVAL;
   }
 
+  if (BreakAtStartup) {
+    raise(SIGTRAP);
+  }
+
   if (PauseAtStartup) {
     os::pause();
   }

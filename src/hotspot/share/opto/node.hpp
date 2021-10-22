@@ -764,14 +764,15 @@ public:
     Flag_is_cisc_alternate           = 1 << 5,
     Flag_is_dead_loop_safe           = 1 << 6,
     Flag_may_be_short_branch         = 1 << 7,
-    Flag_avoid_back_to_back_before   = 1 << 8,
-    Flag_avoid_back_to_back_after    = 1 << 9,
-    Flag_has_call                    = 1 << 10,
-    Flag_is_reduction                = 1 << 11,
-    Flag_is_scheduled                = 1 << 12,
-    Flag_has_vector_mask_set         = 1 << 13,
-    Flag_is_expensive                = 1 << 14,
-    Flag_for_post_loop_opts_igvn     = 1 << 15,
+    Flag_may_be_compressed_branch    = 1 << 8,
+    Flag_avoid_back_to_back_before   = 1 << 9,
+    Flag_avoid_back_to_back_after    = 1 << 10,
+    Flag_has_call                    = 1 << 11,
+    Flag_is_reduction                = 1 << 12,
+    Flag_is_scheduled                = 1 << 13,
+    Flag_has_vector_mask_set         = 1 << 14,
+    Flag_is_expensive                = 1 << 15,
+    Flag_for_post_loop_opts_igvn     = 1 << 16,
     _last_flag                       = Flag_for_post_loop_opts_igvn
   };
 

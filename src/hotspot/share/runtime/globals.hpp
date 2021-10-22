@@ -2074,6 +2074,9 @@ const intx ObjectAlignmentInBytes = 8;
           false AARCH64_ONLY(DEBUG_ONLY(||true)),                           \
              "Mark all threads after a safepoint, and clear on a modify "   \
              "fence. Add cleanliness checks.")                              \
+                                                                            \
+  product(bool, BreakAtStartup, false,                                      \
+                "Allow allocating fields in empty slots of super-classes")  \
 
 // end of RUNTIME_FLAGS
 

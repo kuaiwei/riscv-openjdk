@@ -590,7 +590,7 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
             blk_size += nop_size;
           }
         }
-        if (mach->may_be_short_branch()) {
+        if (mach->may_be_short_branch() || pd_may_be_compressed_branch(mach)) {
           if (!nj->is_MachBranch()) {
 #ifndef PRODUCT
             nj->dump(3);
@@ -599,6 +599,7 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
           }
           assert(jmp_nidx[i] == -1, "block should have only one branch");
           jmp_offset[i] = blk_size;
+          assert(nj->as_MachBranch()->compress_mode() == MachBranchNode::NON_COMPRESS, "default compress mode");
           jmp_size[i]   = nj->size(C->regalloc());
           jmp_nidx[i]   = j;
           has_short_branch_candidate = true;
@@ -654,7 +655,7 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
       Block* block = C->cfg()->get_block(i);
       int idx = jmp_nidx[i];
       MachNode* mach = (idx == -1) ? NULL: block->get_node(idx)->as_Mach();
-      if (mach != NULL && mach->may_be_short_branch()) {
+      if (mach != NULL && (mach->may_be_short_branch() || pd_may_be_compressed_branch(mach))) {
 #ifdef ASSERT
         assert(jmp_size[i] > 0 && mach->is_MachBranch(), "sanity");
         int j;
@@ -688,14 +689,31 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
         if (needs_padding && offset <= 0)
           offset -= nop_size;
 
-        if (C->matcher()->is_short_branch_offset(mach->rule(), br_size, offset)) {
+        if (mach->may_be_short_branch() && C->matcher()->is_short_branch_offset(mach->rule(), br_size, offset)) {
           // We've got a winner.  Replace this branch.
           MachNode* replacement = mach->as_MachBranch()->short_branch_version();
-
-          // Update the jmp_size.
+          guarantee(replacement != NULL && replacement->is_MachBranch(), "sanity");
           int new_size = replacement->size(C->regalloc());
+          MachBranchNode* br = replacement->as_MachBranch();
+          assert(br == replacement, "not change");
+          if (UseCExt && br->compress_mode() != MachBranchNode::FORCE_COMPRESS) {
+            // replacement may be compressed
+            br->set_compress_mode(MachBranchNode::TRY_COMPRESS);
+            int compress_size = br->actual_branch_size(C->regalloc(), offset);
+            if ( compress_size<new_size ) {
+                // tty->print_cr("======= got a compress hit, %d offset:%d", new_size-compress_size, offset);
+                // mach->dump(1);
+                // tty->print_cr("======= compress end");
+                new_size = compress_size;
+                br->set_compress_mode(MachBranchNode::FORCE_COMPRESS);
+            } else {
+                assert(compress_size == new_size, "branch is expanded");
+                br->set_compress_mode(MachBranchNode::NON_COMPRESS);
+            }
+          }
           int diff     = br_size - new_size;
-          assert(diff >= (int)nop_size, "short_branch size should be smaller");
+          br_size      = new_size;
+          assert(diff >= (int)nop_size && (diff % 2) == 0, "short_branch size should be smaller");
           // Conservatively take into account padding between
           // avoid_back_to_back branches. Previous branch could be
           // converted into avoid_back_to_back branch during next
@@ -717,8 +735,41 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
           // The jump distance is not short, try again during next iteration.
           has_short_branch_candidate = true;
         }
-      } // (mach->may_be_short_branch())
+        // check if it can be compressed
+        if (UseCExt) {  // todo: replace UseCEXT with other option
+            if (pd_may_be_compressed_branch(mach)) {
+                assert(mach != NULL && mach->is_MachBranch(), "sanity");
+
+                MachBranchNode* br = mach->as_MachBranch();
+                assert(br == mach, "not change");
+                if (br->compress_mode() != MachBranchNode::FORCE_COMPRESS) {
+                    br->set_compress_mode(MachBranchNode::TRY_COMPRESS);
+                    int new_size = br->actual_branch_size(C->regalloc(), offset);
+                    int diff = br_size - new_size;
+                    if (diff > 0) {
+                        assert(diff >= (int) nop_size && (diff % 2) == 0, "compress_branch size should be smaller");
+                        // tty->print_cr("======= got a compress hit, %d offset:%d", diff, offset);
+                        // mach->dump(1);
+                        // tty->print_cr("======= compress end");
+                        br->set_compress_mode(MachBranchNode::FORCE_COMPRESS);
+
+                        adjust_block_start += diff;
+                        progress = true;
+
+                        jmp_size[i] = new_size;
+                    } else {
+                        assert(diff == 0, "branch is expanded");
+                        br->set_compress_mode(MachBranchNode::NON_COMPRESS);
+                    }
+                }
+            } else {
+                // check in next round
+                has_short_branch_candidate = true;
+            }
+        }
+      } // (mach->may_be_short_branch() || compress)
       if (mach != NULL && (mach->may_be_short_branch() ||
+                           (UseCExt && pd_may_be_compressed_branch(mach)) ||
                            mach->avoid_back_to_back(MachNode::AVOID_AFTER))) {
         last_may_be_short_branch_adr = blk_starts[i] + jmp_offset[i] + jmp_size[i];
       }
@@ -1567,7 +1618,7 @@ void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
           // distance is not updated yet.
           bool delay_slot_is_used = valid_bundle_info(n) &&
                                     C->output()->node_bundling(n)->use_unconditional_delay();
-          if (!delay_slot_is_used && mach->may_be_short_branch()) {
+          if (!delay_slot_is_used && (mach->may_be_short_branch())) {
             assert(delay_slot == NULL, "not expecting delay slot node");
             int br_size = n->size(C->regalloc());
             int offset = blk_starts[block_num] - current_offset;
@@ -1583,12 +1634,12 @@ void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
             if (needs_padding && offset <= 0)
               offset -= nop_size;
 
-            if (C->matcher()->is_short_branch_offset(mach->rule(), br_size, offset)) {
+            if (mach->may_be_short_branch() && C->matcher()->is_short_branch_offset(mach->rule(), br_size, offset)) {
               // We've got a winner.  Replace this branch.
               MachNode* replacement = mach->as_MachBranch()->short_branch_version();
 
               // Update the jmp_size.
-              int new_size = replacement->size(C->regalloc());
+              int new_size = replacement->as_MachBranch()->actual_branch_size(C->regalloc(), offset);
               assert((br_size - new_size) >= (int)nop_size, "short_branch size should be smaller");
               // Insert padding between avoid_back_to_back branches.
               if (needs_padding && replacement->avoid_back_to_back(MachNode::AVOID_BEFORE)) {
@@ -1764,6 +1815,14 @@ void PhaseOutput::fill_buffer(CodeBuffer* cb, uint* blk_starts) {
       }
 
     } // End for all instructions in block
+    /*
+    if((int)(blk_starts[i+1] - blk_starts[i]) < (current_offset - blk_offset)) {
+        tty->print_cr("dump block");
+        Block *nb = C->cfg()->get_block(i);
+        nb->dump();
+        tty->print_cr("dump block size, %d %d %d %d", blk_starts[i+1], blk_starts[i], current_offset, blk_offset);
+    }
+    */
 
     // If the next block is the top of a loop, pad this block out to align
     // the loop top a little. Helps prevent pipe stalls at loop back branches.
@@ -3277,7 +3336,7 @@ void PhaseOutput::init_scratch_buffer_blob(int const_size) {
 
 //-----------------------scratch_emit_size-------------------------------------
 // Helper function that computes size by emitting code
-uint PhaseOutput::scratch_emit_size(const Node* n) {
+uint PhaseOutput::scratch_emit_size(const Node* n, int branch_offset) {
   // Start scratch_emit_size section.
   set_in_scratch_emit_size(true);
 
@@ -3319,7 +3378,11 @@ uint PhaseOutput::scratch_emit_size(const Node* n) {
   bool is_branch = n->is_MachBranch();
   if (is_branch) {
     MacroAssembler masm(&buf);
-    masm.bind(fakeL);
+    if (branch_offset != max_jint) {
+      masm.bind_with_offset(fakeL, branch_offset);
+    } else {
+      masm.bind(fakeL);
+    }
     n->as_MachBranch()->save_label(&saveL, &save_bnum);
     n->as_MachBranch()->label_set(&fakeL, 0);
   }

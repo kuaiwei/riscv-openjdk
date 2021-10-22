@@ -91,6 +91,9 @@ class Label {
   int _patch_index;
   GrowableArray<int>* _patch_overflow;
 
+  // in scratch mode ,we will give an offset to compute actual size
+  int _given_offset;
+
   Label(const Label&) { ShouldNotReachHere(); }
  protected:
 
@@ -113,6 +116,9 @@ class Label {
     _loc = loc;
   }
   void bind_loc(int pos, int sect) { bind_loc(CodeBuffer::locator(pos, sect)); }
+
+  int given_offset() const { return _given_offset; }
+  void set_given_offset(int v) { _given_offset = v; }
 
 #ifndef PRODUCT
   // Iterates over all unresolved instructions for printing
@@ -158,6 +164,7 @@ class Label {
     _patch_index = 0;
     _patch_overflow = NULL;
     _is_near = false;
+    _given_offset = 0;
   }
 
   Label() {
@@ -359,6 +366,7 @@ class AbstractAssembler : public ResourceObj  {
 
   // Label functions
   void bind(Label& L); // binds an unbound label L to the current code position
+  void bind(Label& L, int offset); // binds an unbound label L to (current position + offset), used in scratch mode
 
   // Move to a different section in the same code buffer.
   void set_code_section(CodeSection* cs);

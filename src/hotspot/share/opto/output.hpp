@@ -43,6 +43,7 @@ class Block_Array;
 class ciMethod;
 class Compile;
 class MachNode;
+class MachBranchNode;
 class MachSafePointNode;
 class Node;
 class PhaseCFG;
@@ -147,6 +148,9 @@ private:
   void perform_mach_node_analysis();
   void pd_perform_mach_node_analysis();
 
+  bool pd_may_be_compressed_branch(MachNode* m);
+  // void pd_mark_compressed_branch(CodeBuffer& cb, MachBranchNode* m);
+
 public:
   PhaseOutput();
   ~PhaseOutput();
@@ -223,7 +227,7 @@ public:
   int               scratch_buffer_code_size()  { return (address)scratch_locs_memory() - _scratch_buffer_blob->content_begin(); }
 
   // emit to scratch blob, report resulting size
-  uint              scratch_emit_size(const Node* n);
+  uint              scratch_emit_size(const Node* n, int branch_offset);
   void       set_in_scratch_emit_size(bool x)   {        _in_scratch_emit_size = x; }
   bool           in_scratch_emit_size() const   { return _in_scratch_emit_size;     }
 

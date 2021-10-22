@@ -1071,6 +1071,52 @@ void reg_mask_init() {
 void PhaseOutput::pd_perform_mach_node_analysis() {
 }
 
+bool PhaseOutput::pd_may_be_compressed_branch(MachNode* mach) {
+  if (!UseCExt || mach == NULL) return false;
+
+  if (mach->is_MachIf() || mach->is_MachGoto()) return true;
+
+  return false;
+}
+
+#if 0
+void PhaseOutput::pd_mark_compressed_branch(CodeBuffer& cb, MachBranchNode* branch) {
+  if (!UseCExt || branch == NULL) return;
+  assert(in_scratch_emit_size(), "only called in scratch mode");
+
+  if (branch->is_MachGoto()) {
+    branch->mark_may_be_compressed_branch();
+    return;
+  }
+
+  if (branch->is_MachIf()) {
+    // assert(cb.insts_size() % 4 == 0, "the branch should not be compressed");
+    // check cond branch
+    address cond_branch = NULL;
+    address inst = cb.insts_begin();
+    while(inst < cb.insts_end()) {
+      if (NativeInstruction::is_cbeqne_at(inst)) {
+        cond_branch = inst;
+        break;
+      } else {
+        inst+= NativeInstruction::is_compressed_instr(inst) ? 2 : 4;
+      }
+    }
+
+    if (cond_branch != NULL) {
+      // check register
+      Register rs = NativeInstruction::extract_reg_from_cbeqne(cond_branch, /* src */ true);
+      Register rd = NativeInstruction::extract_reg_from_cbeqne(cond_branch, /* src */ false);
+      if (rd == x0 && rs >= x0 && rs <= x7) {
+        branch->mark_may_be_compressed_branch();
+        return;
+      }
+    }
+  }
+  return;
+}
+#endif
+
 int MachNode::pd_alignment_required() const {
   return 1;
 }
@@ -1841,8 +1887,17 @@ bool Matcher::is_short_branch_offset(int rule, int br_size, int offset) {
   // The passed offset is relative to address of the branch.
   int shortBrSize = br_size - 4;
   int offs = offset - shortBrSize + 4;
+  return (-4096 <= offs && offs <= 4094);
+}
+
+/*
+bool Matcher::is_compressed_branch_offset(int rule, int br_size, int offset) {
+  // The passed offset is relative to address of the branch.
+  int shortBrSize = br_size - 4;
+  int offs = offset - shortBrSize + 4;
   return (-4096 <= offs && offs < 4096);
 }
+*/
 
 // Vector width in bytes.
 const int Matcher::vector_width_in_bytes(BasicType bt) {
@@ -2130,12 +2185,74 @@ encode %{
                /*result as bool*/ true);
   %}
 
-  // compare and branch instruction encodings
-
   enc_class riscv64_enc_j(label lbl) %{
     C2_MacroAssembler _masm(&cbuf);
     Label* L = $lbl$$label;
-    __ j(*L);
+    switch(compress_mode()) {
+    case NON_COMPRESS:
+      __ j_nc(*L);
+      break;
+    case TRY_COMPRESS:
+      assert(L->is_bound(),"label must be bind");
+      __ j(*L);
+      break;
+    case FORCE_COMPRESS:
+      __ c_j(*L);
+      break;
+    default:
+      Unimplemented();
+    }
+  %}
+
+  // compare and branch instruction encodings
+  enc_class riscv64_enc_cmpEqNe_imm0_branch(cmpOpEqNe cmp, iRegI r, label lbl) %{
+    C2_MacroAssembler _masm(&cbuf);
+    Register reg = as_Register($r$$reg);
+    Label* L = $lbl$$label;
+    int cmpcode = $cmp$$cmpcode;
+    bool is_far = false;
+    switch(compress_mode()) {
+    case NON_COMPRESS:
+      __ enc_cmpEqNe_imm0_branch(cmpcode, reg, *L, is_far, /* is_compressed */ false);
+      break;
+    case TRY_COMPRESS:
+      assert(L->is_bound(),"label must be bind");
+      __ enc_cmpEqNe_imm0_branch(cmpcode, reg, *L, is_far, /* is_compressed */ true);
+      break;
+    case FORCE_COMPRESS:
+      // enc_cmpEqNe use wrap_label, but it can not handle offset=0 in case forward jump
+      // so generate compress instructions
+      if (cmpcode == BoolTest::eq) {
+        __ c_beqz(reg, *L);
+      } else if (cmpcode == BoolTest::ne) {
+        __ c_bnez(reg, *L);
+      } else {
+        Unimplemented();
+      }
+      break;
+    default:
+      Unimplemented();
+    }
+  %}
+
+  enc_class riscv64_enc_far_cmpEqNe_imm0_branch(cmpOpEqNe cmp, iRegI r, label lbl) %{
+    C2_MacroAssembler _masm(&cbuf);
+    Register reg = as_Register($r$$reg);
+    Label* L = $lbl$$label;
+    bool is_far = true;
+    switch(compress_mode()) {
+    case NON_COMPRESS:
+      __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, reg, *L, is_far, /* is_compressed */ false);
+      break;
+    case TRY_COMPRESS:
+      assert(L->is_bound(),"label must be bind");
+      __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, reg, *L, is_far, /* is_compressed */ true);
+      break;
+    case FORCE_COMPRESS:
+    default:
+      // do we compress far branch?
+      Unimplemented();
+    }
   %}
 
   enc_class riscv64_enc_far_cmpULtGe_imm0_branch(cmpOpULtGe cmp, iRegIorL op1, label lbl) %{
@@ -8488,9 +8605,7 @@ instruct cmpFlag_branch(cmpOpEqNe cmp, iRegI_R6 cr, label lbl) %{
   ins_cost(BRANCH_COST);
   format %{ "b$cmp  $cr, zr, $lbl\t#@cmpFlag_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($cr$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, cr, lbl));
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
 %}
@@ -8973,9 +9088,7 @@ instruct cmpP_imm0_branch(cmpOpEqNe cmp, iRegP op1, immP0 zero, label lbl) %{
   ins_cost(BRANCH_COST);
   format %{ "b$cmp   $op1, zr, $lbl\t#@cmpP_imm0_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
@@ -8989,9 +9102,7 @@ instruct cmpP_imm0_loop(cmpOpEqNe cmp, iRegP op1, immP0 zero, label lbl) %{
   ins_cost(BRANCH_COST);
   format %{ "b$cmp   $op1, zr, $lbl\t#@cmpP_imm0_loop" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
@@ -9007,9 +9118,7 @@ instruct cmpN_imm0_branch(cmpOpEqNe cmp, iRegN op1, immN0 zero, label lbl) %{
 
   format %{ "b$cmp  $op1, zr, $lbl\t#@cmpN_imm0_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
@@ -9024,9 +9133,7 @@ instruct cmpN_imm0_loop(cmpOpEqNe cmp, iRegN op1, immN0 zero, label lbl) %{
 
   format %{ "b$cmp  $op1, zr, $lbl\t#@cmpN_imm0_loop" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
@@ -9041,9 +9148,7 @@ instruct cmpP_narrowOop_imm0_branch(cmpOpEqNe cmp, iRegN op1, immP0 zero, label 
   ins_cost(BRANCH_COST);
   format %{ "b$cmp   $op1, zr, $lbl\t#@cmpP_narrowOop_imm0_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
@@ -9057,9 +9162,7 @@ instruct cmpP_narrowOop_imm0_loop(cmpOpEqNe cmp, iRegN op1, immP0 zero, label lb
   ins_cost(BRANCH_COST);
   format %{ "b$cmp   $op1, zr, $lbl\t#@cmpP_narrowOop_imm0_loop" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label));
-  %}
+  ins_encode(riscv64_enc_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
   ins_short_branch(1);
@@ -9074,9 +9177,7 @@ instruct far_cmpFlag_branch(cmpOp cmp, iRegI_R6 cr, label lbl) %{
   ins_cost(BRANCH_COST);
   format %{ "far_b$cmp $cr, zr, L\t#@far_cmpFlag_branch"%}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($cr$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, cr, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}
@@ -9546,9 +9647,7 @@ instruct far_cmpP_imm0_branch(cmpOpEqNe cmp, iRegP op1, immP0 zero, label lbl) %
   ins_cost(BRANCH_COST * 2);
   format %{ "far_b$cmp   $op1, zr, $lbl\t#@far_cmpP_imm0_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}
@@ -9560,9 +9659,7 @@ instruct far_cmpP_imm0_loop(cmpOpEqNe cmp, iRegP op1, immP0 zero, label lbl) %{
   ins_cost(BRANCH_COST * 2);
   format %{ "far_b$cmp   $op1, zr, $lbl\t#@far_cmpP_imm0_loop" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}
@@ -9575,9 +9672,7 @@ instruct far_cmpN_imm0_branch(cmpOpEqNe cmp, iRegN op1, immN0 zero, label lbl) %
 
   format %{ "far_b$cmp  $op1, zr, $lbl\t#@far_cmpN_imm0_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}
@@ -9590,9 +9685,7 @@ instruct far_cmpN_imm0_loop(cmpOpEqNe cmp, iRegN op1, immN0 zero, label lbl) %{
 
   format %{ "far_b$cmp  $op1, zr, $lbl\t#@far_cmpN_imm0_loop" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}
@@ -9604,9 +9697,7 @@ instruct far_cmpP_narrowOop_imm0_branch(cmpOpEqNe cmp, iRegN op1, immP0 zero, la
   ins_cost(BRANCH_COST * 2);
   format %{ "far_b$cmp   $op1, zr, $lbl\t#@far_cmpP_narrowOop_imm0_branch" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}
@@ -9618,9 +9709,7 @@ instruct far_cmpP_narrowOop_imm0_loop(cmpOpEqNe cmp, iRegN op1, immP0 zero, labe
   ins_cost(BRANCH_COST * 2);
   format %{ "far_b$cmp   $op1, zr, $lbl\t#@far_cmpP_narrowOop_imm0_loop" %}
 
-  ins_encode %{
-    __ enc_cmpEqNe_imm0_branch($cmp$$cmpcode, as_Register($op1$$reg), *($lbl$$label), /* is_far */ true);
-  %}
+  ins_encode(riscv64_enc_far_cmpEqNe_imm0_branch(cmp, op1, lbl));
 
   ins_pipe(pipe_cmpz_branch);
 %}

@@ -1242,13 +1242,15 @@ void C2_MacroAssembler::enc_cmpUEqNeLeGt_imm0_branch(int cmpFlag, Register op1, 
   }
 }
 
-void C2_MacroAssembler::enc_cmpEqNe_imm0_branch(int cmpFlag, Register op1, Label& L, bool is_far) {
+void C2_MacroAssembler::enc_cmpEqNe_imm0_branch(int cmpFlag, Register op1, Label& L, bool is_far, bool is_compress) {
   switch (cmpFlag) {
     case BoolTest::eq:
-      beqz_nc(op1, L, is_far);
+      if (is_compress) beqz(op1, L, is_far);
+      else beqz_nc(op1, L, is_far);
       break;
     case BoolTest::ne:
-      bnez_nc(op1, L, is_far);
+      if (is_compress) bnez(op1, L, is_far);
+      else bnez_nc(op1, L, is_far);
       break;
     default:
       ShouldNotReachHere();

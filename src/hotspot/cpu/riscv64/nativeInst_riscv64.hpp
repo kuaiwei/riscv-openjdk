@@ -92,6 +92,27 @@ class NativeInstruction {
                                                                                     Assembler::extract(((unsigned*)instr)[0], 14, 12) == 0b000); }
   static bool is_lui_at(address instr)        { assert_cond(instr != NULL); return Assembler::extract(((unsigned*)instr)[0], 6, 0) == 0b0110111; }
   static bool is_slli_shift_at(address instr, uint32_t shift) { int size = 0; return is_slli_shift_at(instr, shift, size); }
+  static bool is_cbeqne_at(address instr)     { assert_cond(instr != NULL); return (is_branch_at(instr) && Assembler::extract(((unsigned*)instr)[0], 14,13) == 0b00); }
+  static bool is_c_j_at(address instr) {
+    assert_cond(instr != NULL);
+    return (is_compressed_instr(instr)
+            && Assembler::extract(((unsigned*)instr)[0], 1,0) == 0b01
+            && Assembler::extract(((unsigned*)instr)[0], 15,13) == 0b101);
+  }
+  static bool is_c_beqnez_at(address instr) {
+      assert_cond(instr != NULL);
+      return (is_compressed_instr(instr)
+              && Assembler::extract(((unsigned*)instr)[0], 1,0) == 0b01
+              && Assembler::extract(((unsigned*)instr)[0], 15,14) == 0b11);
+  }
+  static Register extract_reg_from_cbeqne(address instr, bool src) {
+    assert_cond(instr != NULL && is_cbeqne_at(instr));
+    if (src) {
+      return ((Register) (intptr_t) Assembler::extract(((unsigned *) instr)[0], 19, 15));
+    } else {
+      return ((Register)(intptr_t)Assembler::extract(((unsigned*)instr)[0], 11, 7));
+    }
+  }
   static uint16_t extract_c_slli(address instr) {
     uint16_t low5 = Assembler::extract_c(((uint16_t*)instr)[0], 6, 2);
     uint16_t high1 = Assembler::extract_c(((uint16_t*)instr)[0], 12, 12);
