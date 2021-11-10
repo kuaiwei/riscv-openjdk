@@ -147,15 +147,27 @@ void MachNode::postalloc_expand(GrowableArray <Node *> *nodes, PhaseRegAlloc *ra
 uint MachNode::size(PhaseRegAlloc *ra_) const {
   // If a virtual was not defined for this specific instruction,
   // Call the helper which finds the size by emitting the bits.
-  return MachNode::emit_size(ra_);
+  return MachNode::emit_size(ra_, MachBranchNode::INVALID_BRANCH_SIZE);
+}
+
+uint MachBranchNode::try_compress_size(PhaseRegAlloc *ra_, int branch_offset) {
+  CompressBranchMode old = _compress_mode;
+  assert(old == NON_COMPRESS, "mode is not set correctly");
+  _compress_mode = TRY_COMPRESS;
+  uint size = MachNode::emit_size(ra_, branch_offset);
+  _compress_mode = old;
+  return size;
 }
 
 //------------------------------size-------------------------------------------
 // Helper function that computes size by emitting code
-uint MachNode::emit_size(PhaseRegAlloc *ra_) const {
+uint MachNode::emit_size(PhaseRegAlloc *ra_, int branch_offset) const {
   // Emit into a trash buffer and count bytes emitted.
   assert(ra_ == ra_->C->regalloc(), "sanity");
-  return ra_->C->output()->scratch_emit_size(this);
+  if (branch_offset != MachBranchNode::INVALID_BRANCH_SIZE) {
+    guarantee(this->is_MachBranch(), "branch offset is only used for branch");
+  }
+  return ra_->C->output()->scratch_emit_size(this, branch_offset);
 }
 
 
@@ -627,7 +639,11 @@ void MachProjNode::dump_spec(outputStream *st) const {
 //=============================================================================
 #ifndef PRODUCT
 void MachIfNode::dump_spec(outputStream *st) const {
-  st->print("P=%f, C=%f",_prob, _fcnt);
+  st->print("P=%f, C=%f compress=%d",_prob, _fcnt, compress_mode());
+}
+
+void MachGotoNode::dump_spec(outputStream *st) const {
+  st->print("compress=%d", compress_mode());
 }
 #endif
 

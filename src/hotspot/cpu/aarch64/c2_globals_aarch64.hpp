@@ -55,6 +55,7 @@ define_pd_global(intx, LoopPercentProfileLimit,      10);
 // InitialCodeCacheSize derived from specjbb2000 run.
 define_pd_global(intx, InitialCodeCacheSize,         2496*K); // Integral multiple of CodeCacheExpansionSize
 define_pd_global(intx, CodeCacheExpansionSize,       64*K);
+define_pd_global(bool, UseCompressedBranch,          false);
 
 // Ergonomics related flags
 define_pd_global(uint64_t,MaxRAM,                    128ULL*G);

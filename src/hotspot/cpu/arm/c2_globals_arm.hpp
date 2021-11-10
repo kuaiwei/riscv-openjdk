@@ -81,6 +81,7 @@ define_pd_global(size_t, NonProfiledCodeHeapSize,    21*M);
 define_pd_global(size_t, ProfiledCodeHeapSize,       22*M);
 define_pd_global(size_t, NonNMethodCodeHeapSize,     5*M );
 define_pd_global(size_t, CodeCacheExpansionSize,     64*K);
+define_pd_global(bool,   UseCompressedBranch,        false);
 
 // Ergonomics related flags
 define_pd_global(uint64_t, MaxRAM,                   128ULL*G);

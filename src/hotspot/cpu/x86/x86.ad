@@ -1296,6 +1296,11 @@ void PhaseOutput::pd_perform_mach_node_analysis() {
   }
 }
 
+bool PhaseOutput::pd_may_be_compressed_branch(PhaseRegAlloc *ra, MachNode *mach) {
+  ShouldNotReachHere();
+  return false;
+}
+
 int MachNode::pd_alignment_required() const {
   if (VM_Version::has_intel_jcc_erratum() && IntelJccErratum::is_jcc_erratum_branch(this)) {
     // Conservatively add worst case padding. We assume that relocInfo::addr_unit() is 1 on x86.

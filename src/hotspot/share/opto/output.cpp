@@ -599,6 +599,7 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
           }
           assert(jmp_nidx[i] == -1, "block should have only one branch");
           jmp_offset[i] = blk_size;
+          assert(nj->as_MachBranch()->compress_mode() == MachBranchNode::NON_COMPRESS, "default compress mode was changed");
           jmp_size[i]   = nj->size(C->regalloc());
           jmp_nidx[i]   = j;
           has_short_branch_candidate = true;
@@ -654,7 +655,9 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
       Block* block = C->cfg()->get_block(i);
       int idx = jmp_nidx[i];
       MachNode* mach = (idx == -1) ? NULL: block->get_node(idx)->as_Mach();
-      if (mach != NULL && mach->may_be_short_branch()) {
+      if (mach != NULL &&
+          (mach->may_be_short_branch() || pd_may_be_compressed_branch(C->regalloc(), mach))
+         ) {
 #ifdef ASSERT
         assert(jmp_size[i] > 0 && mach->is_MachBranch(), "sanity");
         int j;
@@ -688,7 +691,7 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
         if (needs_padding && offset <= 0)
           offset -= nop_size;
 
-        if (C->matcher()->is_short_branch_offset(mach->rule(), br_size, offset)) {
+        if (mach->may_be_short_branch() && C->matcher()->is_short_branch_offset(mach->rule(), br_size, offset)) {
           // We've got a winner.  Replace this branch.
           MachNode* replacement = mach->as_MachBranch()->short_branch_version();
 
@@ -717,7 +720,33 @@ void PhaseOutput::shorten_branches(uint* blk_starts) {
           // The jump distance is not short, try again during next iteration.
           has_short_branch_candidate = true;
         }
-      } // (mach->may_be_short_branch())
+        // check if it can be compressed
+        if (UseCompressedBranch && mach != NULL && pd_may_be_compressed_branch(C->regalloc(), mach)) {
+          assert(mach->is_MachBranch(), "sanity");
+
+          MachBranchNode* br = mach->as_MachBranch();
+          br_size = jmp_size[i];
+          assert(br == mach, "not change");
+          if (br->compress_mode() == MachBranchNode::NON_COMPRESS) {
+            int new_size = br->try_compress_size(C->regalloc(), offset);
+            int diff = br_size - new_size;
+            if (diff > 0) {
+              assert(diff >= (int) nop_size, "compress_branch size should be smaller");
+              br->set_compress_mode(MachBranchNode::FORCE_COMPRESS);
+
+              adjust_block_start += diff;
+              progress = true;
+
+              jmp_size[i] = new_size;
+            } else {
+              assert(diff == 0, "branch is expanded");
+              assert(br->compress_mode() == MachBranchNode::NON_COMPRESS, "compress mode is not restored");
+              // check in next round
+              has_short_branch_candidate = true;
+            }
+          }
+        } // may_be_compressed_branch
+      } // (mach->may_be_short_branch() || may_be_compressed_branch)
       if (mach != NULL && (mach->may_be_short_branch() ||
                            mach->avoid_back_to_back(MachNode::AVOID_AFTER))) {
         last_may_be_short_branch_adr = blk_starts[i] + jmp_offset[i] + jmp_size[i];
@@ -3277,7 +3306,7 @@ void PhaseOutput::init_scratch_buffer_blob(int const_size) {
 
 //-----------------------scratch_emit_size-------------------------------------
 // Helper function that computes size by emitting code
-uint PhaseOutput::scratch_emit_size(const Node* n) {
+uint PhaseOutput::scratch_emit_size(const Node* n, int branch_offset) {
   // Start scratch_emit_size section.
   set_in_scratch_emit_size(true);
 
@@ -3319,7 +3348,12 @@ uint PhaseOutput::scratch_emit_size(const Node* n) {
   bool is_branch = n->is_MachBranch();
   if (is_branch) {
     MacroAssembler masm(&buf);
-    masm.bind(fakeL);
+    if (branch_offset != MachBranchNode::INVALID_BRANCH_SIZE) {
+      assert(UseCompressedBranch, "sanity");
+      masm.bind_with_offset(fakeL, branch_offset);
+    } else {
+      masm.bind(fakeL);
+    }
     n->as_MachBranch()->save_label(&saveL, &save_bnum);
     n->as_MachBranch()->label_set(&fakeL, 0);
   }

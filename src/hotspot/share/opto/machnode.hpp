@@ -290,7 +290,7 @@ public:
   // Size of instruction in bytes
   virtual uint  size(PhaseRegAlloc *ra_) const;
   // Helper function that computes size by emitting code
-  virtual uint  emit_size(PhaseRegAlloc *ra_) const;
+  virtual uint  emit_size(PhaseRegAlloc *ra_, int branch_offset) const;
 
   // Return the alignment required (in units of relocInfo::addr_unit())
   // for this instruction (must be a power of 2)
@@ -679,7 +679,7 @@ public:
 // Abstract machine branch Node
 class MachBranchNode : public MachIdealNode {
 public:
-  MachBranchNode() : MachIdealNode() {
+  MachBranchNode() : MachIdealNode(), _compress_mode(NON_COMPRESS){
     init_class_id(Class_MachBranch);
   }
   virtual void label_set(Label* label, uint block_num) = 0;
@@ -687,8 +687,25 @@ public:
 
   // Support for short branches
   virtual MachNode *short_branch_version() { return NULL; }
+  // try compress branch with given offset
+  uint try_compress_size(PhaseRegAlloc *ra, int branch_offset);
 
   virtual bool pinned() const { return true; };
+
+  enum {
+    INVALID_BRANCH_SIZE = max_jint,
+  };
+
+  // for compress branch
+  enum CompressBranchMode {
+    NON_COMPRESS,    // default mode
+    FORCE_COMPRESS,
+    TRY_COMPRESS,
+  };
+  CompressBranchMode compress_mode() const      {return _compress_mode;}
+  void set_compress_mode(CompressBranchMode _v) {_compress_mode = _v;}
+private:
+  CompressBranchMode _compress_mode;
 };
 
 //------------------------------MachNullChkNode--------------------------------
@@ -788,6 +805,10 @@ public:
   MachGotoNode() : MachBranchNode() {
     init_class_id(Class_MachGoto);
   }
+
+#ifndef PRODUCT
+  virtual void dump_spec(outputStream *st) const;
+#endif
 };
 
 //------------------------------MachFastLockNode-------------------------------------

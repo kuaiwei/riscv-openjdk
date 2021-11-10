@@ -120,6 +120,28 @@ void AbstractAssembler::bind(Label& L) {
   L.patch_instructions((MacroAssembler*)this);
 }
 
+/*
+void AbstractAssembler::bind(Label& L, int offset) {
+  guarantee(!L.is_bound(), "only bind once")
+  L.bind_loc(locator() + offset);
+  L.patch_instructions((MacroAssembler*)this);
+}
+*/
+
+void AbstractAssembler::bind_with_offset(Label& L, int offset) {
+  guarantee(!L.is_bound(), "only bind once");
+  bind(L);
+  // shorten_branch will give an unaligned offset for loop padding
+  if (offset>0) {
+    offset = align_up(offset, 2);
+  } else {
+    offset = align_down(offset, 2);
+  };
+  L.set_given_offset(offset);
+  // fences across basic blocks should not be merged
+  code()->clear_last_insn();
+}
+
 void AbstractAssembler::generate_stack_overflow_check(int frame_size_in_bytes) {
   // Each code entry causes one stack bang n pages down the stack where n
   // is configurable by StackShadowPages.  The setting depends on the maximum

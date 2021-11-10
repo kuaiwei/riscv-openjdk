@@ -263,10 +263,15 @@ GrowableArray<int>* CodeBuffer::create_patch_overflow() {
 // Returns a sensible address, and if it is not the label's final
 // address, notes the dependency (at 'branch_pc') on the label.
 address CodeSection::target(Label& L, address branch_pc) {
+#ifndef PRODUCT
+  if (L.given_offset() != 0) {
+    assert(L.is_bound() && index() == CodeBuffer::locator_sect(L.loc()), "must be in same section");
+  }
+#endif
   if (L.is_bound()) {
     int loc = L.loc();
     if (index() == CodeBuffer::locator_sect(loc)) {
-      return start() + CodeBuffer::locator_pos(loc);
+      return start() + CodeBuffer::locator_pos(loc) + L.given_offset();
     } else {
       return outer()->locator_address(loc);
     }

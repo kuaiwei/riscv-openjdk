@@ -767,6 +767,10 @@
           "to stress handling of long counted loops: run inner loop"        \
           "for at most jint_max / StressLongCountedLoop")                   \
           range(0, max_juint)                                               \
+                                                                            \
+  product_pd(bool, UseCompressedBranch,                                     \
+          "support compressed branch (riscv).")                             \
+                                                                            \
 
 // end of C2_FLAGS
 
