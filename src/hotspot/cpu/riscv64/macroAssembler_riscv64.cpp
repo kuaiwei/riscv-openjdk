@@ -1374,6 +1374,10 @@ int MacroAssembler::pd_patch_instruction_size(address branch, address target) {
   } else if (NativeInstruction::is_li32_at(branch)) {                 // li32
     int64_t imm = (intptr_t)target;
     return patch_imm_in_li32(branch, (int32_t)imm);
+  } else if (NativeInstruction::is_c_j_at(branch)) {                  // c_j
+    return patch_offset_in_jal(branch, offset);
+  } else if (NativeInstruction::is_c_beqnez_at(branch)) {             // c_beqz, c_bnez
+    return patch_offset_in_conditional_branch(branch, offset);
   } else {
     tty->print_cr("pd_patch_instruction_size: instruction 0x%x could not be patched!\n", *(unsigned*)branch);
     ShouldNotReachHere();

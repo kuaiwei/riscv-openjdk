@@ -111,6 +111,20 @@ class NativeInstruction {
             (size = instruction_size);
   }
 
+  static bool is_c_j_at(address instr) {
+    assert_cond(instr != NULL);
+    return (is_compressed_instr(instr)
+            && Assembler::extract(((unsigned*)instr)[0], 1, 0) == 0b01
+            && Assembler::extract(((unsigned*)instr)[0], 15, 13) == 0b101);
+  }
+
+  static bool is_c_beqnez_at(address instr) {
+    assert_cond(instr != NULL);
+    return (is_compressed_instr(instr)
+            && Assembler::extract(((unsigned*)instr)[0], 1, 0) == 0b01
+            && Assembler::extract(((unsigned*)instr)[0], 15, 14) == 0b11);
+  }
+
   // return true if the (index1~index2) field of instr1 is equal to (index3~index4) field of instr2, otherwise false
   static bool compare_instr_field(address instr1, int index1, int index2, address instr2, int index3, int index4) {
     assert_cond(instr1 != NULL && instr2 != NULL);

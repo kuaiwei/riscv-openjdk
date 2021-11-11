@@ -208,6 +208,7 @@ void VM_Version::get_processor_features() {
   // compressed instruction extension
   if (FLAG_IS_DEFAULT(UseCExt)) {
     FLAG_SET_DEFAULT(UseCExt, true);
+    FLAG_SET_DEFAULT(UseCompressedBranch, true);
   }
   if (UseCExt) {
     // use a compressed instruction to test if rvc is supported, or triggers a sigill

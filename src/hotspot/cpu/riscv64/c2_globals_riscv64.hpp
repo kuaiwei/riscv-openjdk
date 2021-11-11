@@ -78,6 +78,8 @@ define_pd_global(intx, NonNMethodCodeHeapSize,       5*M );
 define_pd_global(uintx, CodeCacheMinBlockLength,     6);
 define_pd_global(uintx, CodeCacheMinimumUseSpace,    400*K);
 
+define_pd_global(bool, UseCompressedBranch,          false);
+
 // Ergonomics related flags
 define_pd_global(bool, NeverActAsServerClassMachine, false);
 

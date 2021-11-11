@@ -409,7 +409,7 @@ public:
     assert_cond(a != NULL);
     assert_cond(msb >= lsb && msb <= 15);
     unsigned nbits = msb - lsb + 1;
-    guarantee(val < (1U << nbits), "Field too big for insn");
+    guarantee(val < (1U << nbits), "Field too big for insn, %d %d %d", val, msb, lsb);
     uint16_t mask = (1U << nbits) - 1;
     val <<= lsb;
     mask <<= lsb;
